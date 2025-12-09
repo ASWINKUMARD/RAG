@@ -378,7 +378,7 @@
 <body>
     <div class="header">
         <div class="header-left">
-            <a href="index.html" class="back-btn">← Home</a>
+            <a href="/" class="back-btn">← Home</a>
             <h1>📚 RAG Chatbot</h1>
         </div>
         <div style="display: flex; align-items: center; gap: 15px;">
@@ -439,7 +439,7 @@
             <div class="upload-area" onclick="document.getElementById('fileInput').click()">
                 <div style="font-size: 3em;">📄</div>
                 <p><strong>Click to browse</strong> or drag and drop</p>
-                <p style="font-size: 0.9em; margin-top: 10px;">Supported: PDF, DOCX, TXT</p>
+                <p style="font-size: 0.9em; margin-top: 10px;">Supported: PDF, DOCX, TXT (Max 10MB)</p>
             </div>
             <input type="file" id="fileInput" style="display: none;" accept=".pdf,.docx,.txt" onchange="uploadFile()">
             <button style="margin-top: 20px; padding: 10px 30px; background: #e9ecef; border: none; border-radius: 20px; cursor: pointer; font-weight: 600;" onclick="closeUploadModal()">Close</button>
@@ -447,8 +447,8 @@
     </div>
 
     <script>
-        // Backend API URL
-        const API_BASE = 'https://rag-1-csd2.onrender.com';
+        // FIXED: Use relative URL for deployed environments
+        const API_BASE = window.location.origin;
         
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
@@ -464,7 +464,15 @@
         // Check backend connection
         async function checkConnection() {
             try {
-                const response = await fetch(`${API_BASE}/health`);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(`${API_BASE}/health`, {
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
                 if (response.ok) {
                     connectionStatus.className = 'connection-status online';
                     connectionStatus.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
@@ -537,14 +545,20 @@
             showTypingIndicator();
             
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
                 const response = await fetch(`${API_BASE}/api/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         message: message,
                         conversation_history: []
-                    })
+                    }),
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
                 
                 const data = await response.json();
                 hideTypingIndicator();
@@ -556,7 +570,11 @@
                 }
             } catch (error) {
                 hideTypingIndicator();
-                addMessage('Sorry, I\'m having trouble connecting to the backend. Please check if the backend is running.', false);
+                if (error.name === 'AbortError') {
+                    addMessage('Request timeout. Please try again.', false);
+                } else {
+                    addMessage('Sorry, I\'m having trouble connecting to the backend. Please check the connection status.', false);
+                }
                 console.error('Error:', error);
             } finally {
                 sendButton.disabled = false;
@@ -585,15 +603,27 @@
             
             if (!file) return;
 
+            // Validate file size (10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                showError('File size exceeds 10MB limit');
+                fileInput.value = '';
+                return;
+            }
+
             const formData = new FormData();
             formData.append('file', file);
 
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for uploads
+
                 const response = await fetch(`${API_BASE}/api/upload`, {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    signal: controller.signal
                 });
 
+                clearTimeout(timeoutId);
                 const data = await response.json();
 
                 if (response.ok) {
@@ -605,7 +635,11 @@
                     showError('Upload failed: ' + (data.detail || 'Unknown error'));
                 }
             } catch (error) {
-                showError('Upload failed. Please check your connection to the backend.');
+                if (error.name === 'AbortError') {
+                    showError('Upload timeout. Please try a smaller file.');
+                } else {
+                    showError('Upload failed. Please check your connection.');
+                }
                 console.error('Upload error:', error);
             }
 
