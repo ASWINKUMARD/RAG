@@ -124,11 +124,19 @@
             transition: all 0.3s;
             margin-top: 30px;
             box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            border: none;
+            cursor: pointer;
         }
 
         .cta-button:hover {
             transform: translateY(-3px);
             box-shadow: 0 15px 40px rgba(102, 126, 234, 0.5);
+        }
+
+        .cta-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .status-badge {
@@ -184,6 +192,16 @@
             border-top: 1px solid #e9ecef;
             color: #999;
             font-size: 0.9em;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .footer a:hover {
+            color: #764ba2;
         }
 
         @media (max-width: 768px) {
@@ -249,40 +267,53 @@
         <div class="footer">
             <p>Built with FastAPI, AI, and ❤️</p>
             <p style="margin-top: 10px;">
-                <a href="https://rag-1-csd2.onrender.com/docs" target="_blank" 
-                   style="color: #667eea; text-decoration: none;">API Documentation</a>
+                <a href="/docs" target="_blank">API Documentation</a>
             </p>
         </div>
     </div>
 
     <script>
-        const API_BASE = 'https://rag-1-csd2.onrender.com';
+        // FIXED: Use relative URL for deployed environments
+        const API_BASE = window.location.origin;
         const statusBadge = document.getElementById('statusBadge');
         const statusText = document.getElementById('statusText');
         const startButton = document.getElementById('startButton');
 
         async function checkBackendStatus() {
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
                 const response = await fetch(`${API_BASE}/health`, {
                     method: 'GET',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
 
                 if (response.ok) {
                     const data = await response.json();
                     statusBadge.className = 'status-badge';
                     statusText.textContent = `Backend Online (v${data.version})`;
-                    startButton.style.pointerEvents = 'auto';
+                    startButton.disabled = false;
                     startButton.style.opacity = '1';
+                    console.log('✅ Backend connected successfully');
                 } else {
-                    throw new Error('Backend returned error');
+                    throw new Error(`Backend returned status ${response.status}`);
                 }
             } catch (error) {
                 statusBadge.className = 'status-badge error';
-                statusText.textContent = 'Backend Offline - Please wait...';
-                startButton.style.pointerEvents = 'none';
+                
+                if (error.name === 'AbortError') {
+                    statusText.textContent = 'Backend timeout - Retrying...';
+                } else {
+                    statusText.textContent = 'Backend Offline - Please wait...';
+                }
+                
+                startButton.disabled = true;
                 startButton.style.opacity = '0.6';
-                console.error('Backend check failed:', error);
+                console.error('❌ Backend check failed:', error);
                 
                 // Retry after 5 seconds
                 setTimeout(checkBackendStatus, 5000);
@@ -294,6 +325,14 @@
 
         // Recheck every 30 seconds
         setInterval(checkBackendStatus, 30000);
+
+        // Prevent navigation if backend is offline
+        startButton.addEventListener('click', (e) => {
+            if (startButton.disabled) {
+                e.preventDefault();
+                alert('Please wait for the backend to come online before proceeding.');
+            }
+        });
     </script>
 </body>
 </html>
