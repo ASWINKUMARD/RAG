@@ -1,0 +1,29 @@
+# FastAPI and server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# AI/ML libraries
+sentence-transformers
+huggingface-hub
+transformers
+torch
+
+# Vector database (choose one)
+chromadb
+
+
+# Document processing
+pypdf
+python-docx
+pandas
+
+# Utilities
+python-dotenv
+pydantic
+pydantic-settings
+
+# Development
+pytest
+pytest-asyncio
+httpx
