@@ -273,66 +273,44 @@
     </div>
 
     <script>
-        // FIXED: Use relative URL for deployed environments
-        const API_BASE = window.location.origin;
-        const statusBadge = document.getElementById('statusBadge');
-        const statusText = document.getElementById('statusText');
-        const startButton = document.getElementById('startButton');
+      <script>
+    // Use relative URLs - works in all environments
+    const API_BASE = 'https://rag-77.onrender.com';
+    const statusBadge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    const startButton = document.getElementById('startButton');
 
-        async function checkBackendStatus() {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+    async function checkBackendStatus() {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-                const response = await fetch(`${API_BASE}/health`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: controller.signal
-                });
+            const response = await fetch(`${API_BASE}/health`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal
+            });
 
-                clearTimeout(timeoutId);
+            clearTimeout(timeoutId);
 
-                if (response.ok) {
-                    const data = await response.json();
-                    statusBadge.className = 'status-badge';
-                    statusText.textContent = `Backend Online (v${data.version})`;
-                    startButton.disabled = false;
-                    startButton.style.opacity = '1';
-                    console.log('✅ Backend connected successfully');
-                } else {
-                    throw new Error(`Backend returned status ${response.status}`);
-                }
-            } catch (error) {
-                statusBadge.className = 'status-badge error';
-                
-                if (error.name === 'AbortError') {
-                    statusText.textContent = 'Backend timeout - Retrying...';
-                } else {
-                    statusText.textContent = 'Backend Offline - Please wait...';
-                }
-                
-                startButton.disabled = true;
-                startButton.style.opacity = '0.6';
-                console.error('❌ Backend check failed:', error);
-                
-                // Retry after 5 seconds
-                setTimeout(checkBackendStatus, 5000);
+            if (response.ok) {
+                const data = await response.json();
+                statusBadge.className = 'status-badge';
+                statusText.textContent = `Backend Online (v${data.version})`;
+                startButton.disabled = false;
+                console.log('✅ Backend connected');
+            } else {
+                throw new Error(`Status ${response.status}`);
             }
+        } catch (error) {
+            statusBadge.className = 'status-badge error';
+            statusText.textContent = 'Backend Offline';
+            startButton.disabled = true;
+            console.error('❌ Backend error:', error);
+            setTimeout(checkBackendStatus, 5000);
         }
+    }
 
-        // Check backend status on load
-        checkBackendStatus();
-
-        // Recheck every 30 seconds
-        setInterval(checkBackendStatus, 30000);
-
-        // Prevent navigation if backend is offline
-        startButton.addEventListener('click', (e) => {
-            if (startButton.disabled) {
-                e.preventDefault();
-                alert('Please wait for the backend to come online before proceeding.');
-            }
-        });
-    </script>
-</body>
-</html>
+    checkBackendStatus();
+    setInterval(checkBackendStatus, 30000);
+</script>
