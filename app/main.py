@@ -1,3 +1,6 @@
+"""
+FastAPI application entry point with proper CORS and static file serving
+"""
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -46,28 +49,44 @@ if STATIC_DIR.exists():
 from app.api.chat import router as chat_router
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 
+# Add logging
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # Root endpoints
 @app.get("/")
 async def read_root():
     """Serve the main landing page"""
-    index_path = TEMPLATES_DIR / "index.html"
+    # Try multiple possible locations
+    possible_paths = [
+        TEMPLATES_DIR / "index.html",
+        BASE_DIR / "index.html",
+        Path("templates/index.html"),
+        Path("index.html")
+    ]
     
-    if index_path.exists():
-        return FileResponse(
-            str(index_path),
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
+    for index_path in possible_paths:
+        if index_path.exists():
+            logger.info(f"Serving index.html from: {index_path}")
+            return FileResponse(
+                str(index_path),
+                media_type="text/html",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
     
-    # Fallback API response
+    # If no template found, return API info
+    logger.warning(f"index.html not found. Searched: {TEMPLATES_DIR}")
     return JSONResponse({
         "message": "Welcome to RAG Chat API",
         "status": "online",
         "version": "1.0.0",
+        "note": "HTML templates not found. Using API mode.",
         "docs": "/docs",
+        "templates_dir": str(TEMPLATES_DIR),
         "endpoints": {
             "health": "/health",
             "chat_interface": "/chat",
@@ -81,20 +100,33 @@ async def read_root():
 @app.get("/chat")
 async def read_chat():
     """Serve the chat interface"""
-    chat_path = TEMPLATES_DIR / "chat.html"
+    # Try multiple locations
+    possible_paths = [
+        TEMPLATES_DIR / "chat.html",
+        BASE_DIR / "chat.html",
+        Path("templates/chat.html"),
+        Path("chat.html")
+    ]
     
-    if chat_path.exists():
-        return FileResponse(
-            str(chat_path),
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
+    for chat_path in possible_paths:
+        if chat_path.exists():
+            logger.info(f"Serving chat.html from: {chat_path}")
+            return FileResponse(
+                str(chat_path),
+                media_type="text/html",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
     
+    logger.warning(f"chat.html not found. Searched: {TEMPLATES_DIR}")
     return JSONResponse(
-        {"error": "Chat interface not found", "path": str(chat_path)},
+        {
+            "error": "Chat interface not found",
+            "searched_paths": [str(p) for p in possible_paths],
+            "suggestion": "Please ensure chat.html is in the templates/ folder"
+        },
         status_code=404
     )
 
