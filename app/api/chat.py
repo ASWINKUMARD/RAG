@@ -312,7 +312,7 @@ RULES:
                     "X-Title": "RAG Chatbot"
                 },
                 json={
-                    "model": "meta-llama/llama-3.1-8b-instruct:free",
+                    "model": "kwaipilot/kat-coder-pro:free",
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 1200
