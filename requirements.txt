@@ -11,9 +11,20 @@ torch
 
 # Vector database (choose one)
 chromadb
+# Core FastAPI dependencies
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
 
+# PDF extraction (multiple libraries for fallback)
+PyPDF2==3.0.1
 pdfplumber==0.10.3
 pypdf==3.17.4
+pdfminer.six==20221105
+charset-normalizer==3.3.2
+
+# For deployment
+gunicorn==21.2.0
 
 pdfminer.six
 charset-normalizer
