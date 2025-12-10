@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
@@ -6,18 +6,16 @@ import logging
 import os
 import io
 import httpx
+import re
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Global storage
 document_store: Dict[str, List[Dict]] = {}
 uploaded_files = []
 
-# Models
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -38,10 +36,12 @@ class UploadResponse(BaseModel):
     status: str = "success"
 
 def extract_text_from_pdf(content: bytes) -> str:
-    """Extract text from PDF using PyPDF2"""
+    """Extract text from PDF with multiple fallback methods"""
+    text = ""
+    
+    # Method 1: PyPDF2
     try:
         import PyPDF2
-        
         pdf_file = io.BytesIO(content)
         pdf_reader = PyPDF2.PdfReader(pdf_file)
         
@@ -49,31 +49,68 @@ def extract_text_from_pdf(content: bytes) -> str:
         for page_num in range(len(pdf_reader.pages)):
             try:
                 page = pdf_reader.pages[page_num]
-                text = page.extract_text()
-                if text and text.strip():
-                    text_parts.append(text)
+                page_text = page.extract_text()
+                if page_text and page_text.strip():
+                    text_parts.append(page_text)
             except Exception as e:
-                logger.warning(f"Failed to extract page {page_num}: {e}")
-                continue
+                logger.warning(f"PyPDF2 page {page_num} error: {e}")
         
-        full_text = '\n\n'.join(text_parts)
-        
-        if full_text and len(full_text.strip()) > 50:
-            logger.info(f"✓ Extracted {len(full_text)} chars from PDF")
-            return full_text
-        else:
-            logger.error("PDF extraction resulted in insufficient text")
-            return ""
-            
-    except ImportError:
-        logger.error("PyPDF2 not installed!")
-        raise HTTPException(
-            status_code=500,
-            detail="PyPDF2 library not installed. Add 'PyPDF2==3.0.1' to requirements.txt"
-        )
+        text = '\n\n'.join(text_parts)
+        if len(text.strip()) > 100:
+            logger.info(f"✓ PyPDF2 extracted {len(text)} chars")
+            return text
     except Exception as e:
-        logger.error(f"PDF extraction failed: {e}")
-        return ""
+        logger.warning(f"PyPDF2 failed: {e}")
+    
+    # Method 2: pdfplumber (more robust for complex PDFs)
+    try:
+        import pdfplumber
+        pdf_file = io.BytesIO(content)
+        
+        text_parts = []
+        with pdfplumber.open(pdf_file) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                try:
+                    page_text = page.extract_text()
+                    if page_text and page_text.strip():
+                        text_parts.append(page_text)
+                except Exception as e:
+                    logger.warning(f"pdfplumber page {page_num} error: {e}")
+        
+        text = '\n\n'.join(text_parts)
+        if len(text.strip()) > 100:
+            logger.info(f"✓ pdfplumber extracted {len(text)} chars")
+            return text
+    except ImportError:
+        logger.info("pdfplumber not available")
+    except Exception as e:
+        logger.warning(f"pdfplumber failed: {e}")
+    
+    # Method 3: pypdf (alternative library)
+    try:
+        import pypdf
+        pdf_file = io.BytesIO(content)
+        pdf_reader = pypdf.PdfReader(pdf_file)
+        
+        text_parts = []
+        for page in pdf_reader.pages:
+            try:
+                page_text = page.extract_text()
+                if page_text and page_text.strip():
+                    text_parts.append(page_text)
+            except Exception as e:
+                logger.warning(f"pypdf page error: {e}")
+        
+        text = '\n\n'.join(text_parts)
+        if len(text.strip()) > 100:
+            logger.info(f"✓ pypdf extracted {len(text)} chars")
+            return text
+    except ImportError:
+        logger.info("pypdf not available")
+    except Exception as e:
+        logger.warning(f"pypdf failed: {e}")
+    
+    return text
 
 def extract_text_from_docx(content: bytes) -> str:
     """Extract text from DOCX"""
@@ -85,12 +122,10 @@ def extract_text_from_docx(content: bytes) -> str:
         
         text_parts = []
         
-        # Extract paragraphs
         for para in doc.paragraphs:
             if para.text.strip():
                 text_parts.append(para.text)
         
-        # Extract tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -99,63 +134,61 @@ def extract_text_from_docx(content: bytes) -> str:
         
         full_text = '\n\n'.join(text_parts)
         
-        if full_text and len(full_text.strip()) > 20:
+        if len(full_text.strip()) > 20:
             logger.info(f"✓ Extracted {len(full_text)} chars from DOCX")
             return full_text
-        else:
-            return ""
+        return ""
             
     except ImportError:
-        logger.error("python-docx not installed!")
         raise HTTPException(
             status_code=500,
-            detail="python-docx library not installed. Add 'python-docx==1.1.0' to requirements.txt"
+            detail="python-docx not installed. Add 'python-docx==1.1.0' to requirements.txt"
         )
     except Exception as e:
-        logger.error(f"DOCX extraction failed: {e}")
+        logger.error(f"DOCX extraction error: {e}")
         return ""
 
 def extract_text_from_file(content: bytes, filename: str) -> str:
-    """Main text extraction function"""
+    """Main text extraction with improved error handling"""
     try:
-        if filename.lower().endswith('.txt'):
-            # Try different encodings
+        file_lower = filename.lower()
+        
+        if file_lower.endswith('.txt'):
             for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
                 try:
                     text = content.decode(encoding)
-                    if text and len(text.strip()) > 20:
-                        logger.info(f"✓ Decoded TXT with {encoding}")
+                    if len(text.strip()) > 20:
+                        logger.info(f"✓ TXT decoded with {encoding}: {len(text)} chars")
                         return text
                 except:
                     continue
             return ""
         
-        elif filename.lower().endswith('.pdf'):
-            return extract_text_from_pdf(content)
+        elif file_lower.endswith('.pdf'):
+            text = extract_text_from_pdf(content)
+            # Clean up PDF text
+            text = re.sub(r'\s+', ' ', text)
+            text = re.sub(r'\n\s*\n', '\n\n', text)
+            return text.strip()
         
-        elif filename.lower().endswith('.docx'):
+        elif file_lower.endswith('.docx'):
             return extract_text_from_docx(content)
         
         else:
-            # Try as plain text
             return content.decode('utf-8', errors='ignore')
             
     except Exception as e:
-        logger.error(f"Text extraction error: {e}")
+        logger.error(f"Text extraction error for {filename}: {e}")
         return ""
 
-def create_chunks(text: str, chunk_size: int = 600, overlap: int = 150) -> List[Dict]:
-    """Create text chunks with overlap"""
+def create_chunks(text: str, chunk_size: int = 500, overlap: int = 100) -> List[Dict]:
+    """Create overlapping text chunks"""
     
-    # Clean text
-    import re
-    text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
-    text = text.strip()
+    text = re.sub(r'\s+', ' ', text).strip()
     
-    if not text:
+    if not text or len(text) < 50:
         return []
     
-    # Split into sentences (approximate)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     
     chunks = []
@@ -164,12 +197,10 @@ def create_chunks(text: str, chunk_size: int = 600, overlap: int = 150) -> List[
     chunk_idx = 0
     
     for sentence in sentences:
-        sentence_words = sentence.split()
-        sentence_length = len(sentence_words)
+        words = sentence.split()
+        word_count = len(words)
         
-        # If adding this sentence exceeds chunk size
-        if current_length + sentence_length > chunk_size and current_chunk:
-            # Save current chunk
+        if current_length + word_count > chunk_size and current_chunk:
             chunk_text = ' '.join(current_chunk)
             chunks.append({
                 'text': chunk_text,
@@ -178,20 +209,16 @@ def create_chunks(text: str, chunk_size: int = 600, overlap: int = 150) -> List[
             })
             chunk_idx += 1
             
-            # Start new chunk with overlap
-            if overlap > 0:
-                # Keep last few words for overlap
-                overlap_words = current_chunk[-overlap:]
-                current_chunk = overlap_words + sentence_words
+            if overlap > 0 and len(current_chunk) > overlap:
+                current_chunk = current_chunk[-overlap:] + words
                 current_length = len(current_chunk)
             else:
-                current_chunk = sentence_words
-                current_length = sentence_length
+                current_chunk = words
+                current_length = word_count
         else:
-            current_chunk.extend(sentence_words)
-            current_length += sentence_length
+            current_chunk.extend(words)
+            current_length += word_count
     
-    # Save last chunk
     if current_chunk:
         chunk_text = ' '.join(current_chunk)
         chunks.append({
@@ -200,17 +227,17 @@ def create_chunks(text: str, chunk_size: int = 600, overlap: int = 150) -> List[
             'words': set(chunk_text.lower().split())
         })
     
-    logger.info(f"Created {len(chunks)} chunks")
+    logger.info(f"Created {len(chunks)} chunks from {len(text)} chars")
     return chunks
 
 def retrieve_relevant_chunks(query: str, top_k: int = 5) -> List[tuple]:
-    """Retrieve most relevant chunks using keyword matching"""
+    """Retrieve relevant chunks using keyword matching"""
     
     query_lower = query.lower()
     query_words = set(query_lower.split())
     
-    # Remove stop words
-    stop_words = {'the', 'is', 'at', 'which', 'on', 'a', 'an', 'and', 'or', 'but', 'in', 'with', 'to', 'for', 'of'}
+    stop_words = {'the', 'is', 'at', 'which', 'on', 'a', 'an', 'and', 'or', 
+                  'but', 'in', 'with', 'to', 'for', 'of', 'it', 'as', 'by'}
     query_keywords = query_words - stop_words
     
     if not query_keywords:
@@ -226,51 +253,42 @@ def retrieve_relevant_chunks(query: str, top_k: int = 5) -> List[tuple]:
             
             score = 0
             
-            # Exact phrase match
             if query_lower in chunk_lower:
-                score += 200
+                score += 300
             
-            # All keywords present
             if query_keywords.issubset(chunk_words):
-                score += 100
+                score += 150
             
-            # Partial keyword match
             overlap = len(query_keywords & chunk_words)
             if overlap > 0:
-                score += (overlap / len(query_keywords)) * 50
+                score += (overlap / len(query_keywords)) * 100
             
-            # Individual keyword scoring
             for keyword in query_keywords:
                 count = chunk_lower.count(keyword)
-                score += count * 20
+                score += count * 30
             
             if score > 0:
                 results.append((score, doc_id, chunk_text, chunk['index']))
     
-    # Sort by score
     results.sort(reverse=True, key=lambda x: x[0])
     
-    logger.info(f"Found {len(results)} relevant chunks for: {query}")
-    if results:
-        logger.info(f"Top score: {results[0][0]:.1f}")
-    
+    logger.info(f"Found {len(results)} chunks (top score: {results[0][0] if results else 0})")
     return results[:top_k]
 
 async def generate_llm_response(query: str, context: str) -> str:
     """Generate response using OpenRouter API"""
     
-    system_prompt = f"""You are a helpful assistant that answers questions based on provided documents.
+    system_prompt = f"""You are a helpful RAG assistant. Answer based on the provided context.
 
-DOCUMENT CONTEXT:
+CONTEXT:
 {context}
 
-INSTRUCTIONS:
-- Answer the user's question using ONLY the information from the context above
-- Be clear, specific, and well-organized
-- If the context contains the answer, provide it with details
-- If the context doesn't contain the answer, say so honestly
-- Use bullet points or lists when appropriate
-- Cite which document section your answer comes from"""
+RULES:
+- Answer using ONLY information from the context
+- Be specific and detailed
+- Use bullet points for clarity
+- If information is missing, say so
+- Reference document sections when relevant"""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -281,10 +299,10 @@ INSTRUCTIONS:
         api_key = os.getenv('OPENROUTER_API_KEY', '')
         
         if not api_key:
-            logger.warning("No OPENROUTER_API_KEY found")
-            return f"Based on the documents:\n\n{context[:1000]}\n\n(Configure OPENROUTER_API_KEY for AI-generated responses)"
+            logger.warning("No OPENROUTER_API_KEY - using context directly")
+            return f"Based on the documents:\n\n{context[:800]}\n\n(Set OPENROUTER_API_KEY for AI responses)"
         
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=50.0) as client:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -297,10 +315,7 @@ INSTRUCTIONS:
                     "model": "meta-llama/llama-3.1-8b-instruct:free",
                     "messages": messages,
                     "temperature": 0.3,
-                    "max_tokens": 1000,
-                    "top_p": 1,
-                    "frequency_penalty": 0,
-                    "presence_penalty": 0
+                    "max_tokens": 1200
                 }
             )
             
@@ -308,12 +323,12 @@ INSTRUCTIONS:
                 result = response.json()
                 return result['choices'][0]['message']['content']
             else:
-                logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
-                return f"Based on the documents:\n\n{context[:1000]}"
+                logger.error(f"OpenRouter error: {response.status_code}")
+                return f"Based on the documents:\n\n{context[:800]}"
                 
     except Exception as e:
-        logger.error(f"LLM generation error: {e}")
-        return f"Based on the documents:\n\n{context[:1000]}"
+        logger.error(f"LLM error: {e}")
+        return f"Based on the documents:\n\n{context[:800]}"
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -323,22 +338,20 @@ async def chat(request: ChatRequest):
         
         if not document_store:
             return ChatResponse(
-                response="Please upload documents first! Click the 'Upload Document' button above to get started.",
+                response="Please upload documents first! Use the 'Upload Document' button above.",
                 sources=[],
                 status="success"
             )
         
-        # Retrieve relevant chunks
         retrieved = retrieve_relevant_chunks(request.message, top_k=5)
         
         if not retrieved:
             return ChatResponse(
-                response=f"I couldn't find relevant information about '{request.message}' in the uploaded documents. Try asking about: {', '.join(list(document_store.keys())[:3])}",
+                response=f"No relevant information found for '{request.message}'. Try different keywords or upload more documents.",
                 sources=list(document_store.keys()),
                 status="success"
             )
         
-        # Build context
         context_parts = []
         sources = set()
         
@@ -347,8 +360,6 @@ async def chat(request: ChatRequest):
             sources.add(doc_id)
         
         context = "\n\n---\n\n".join(context_parts)
-        
-        # Generate response
         response_text = await generate_llm_response(request.message, context)
         
         return ChatResponse(
@@ -363,59 +374,62 @@ async def chat(request: ChatRequest):
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(file: UploadFile = File(...)):
-    """Upload document endpoint"""
+    """Upload document with robust error handling"""
     try:
         if not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided")
+            raise HTTPException(status_code=400, detail="No filename provided")
         
-        # Validate file type
         allowed = ['.pdf', '.docx', '.txt']
         ext = '.' + file.filename.rsplit('.', 1)[-1].lower()
         
         if ext not in allowed:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(allowed)}"
+                detail=f"File type '{ext}' not supported. Use: PDF, DOCX, or TXT"
             )
         
-        # Read file
         content = await file.read()
         
-        # Size check (100MB)
         if len(content) > 100 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="File exceeds 100MB limit")
+            raise HTTPException(status_code=400, detail="File exceeds 100MB")
+        
+        if len(content) < 100:
+            raise HTTPException(status_code=400, detail="File too small or empty")
         
         logger.info(f"Processing: {file.filename} ({len(content)} bytes)")
         
-        # Extract text
         text = extract_text_from_file(content, file.filename)
         
         if not text or len(text.strip()) < 50:
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not extract text from {file.filename}. The file may be empty, corrupted, or contain only images. Please try a different file."
+                detail=f"Could not extract text from '{file.filename}'. "
+                       f"Possible reasons: (1) PDF contains only images/scans, "
+                       f"(2) File is corrupted, (3) File is password-protected. "
+                       f"Try: Converting scanned PDFs with OCR, using a different file format, "
+                       f"or ensuring the file opens correctly on your computer."
             )
         
         logger.info(f"Extracted {len(text)} characters")
-        logger.info(f"Sample: {text[:200]}...")
         
-        # Create chunks
-        chunks = create_chunks(text, chunk_size=600, overlap=150)
+        chunks = create_chunks(text, chunk_size=500, overlap=100)
         
         if not chunks:
-            raise HTTPException(status_code=400, detail="Failed to create chunks")
+            raise HTTPException(
+                status_code=400, 
+                detail="Text extracted but chunking failed. File may be too short."
+            )
         
-        # Store
         doc_id = file.filename
         document_store[doc_id] = chunks
         
         if doc_id not in uploaded_files:
             uploaded_files.append(doc_id)
         
-        logger.info(f"✓ Stored {len(chunks)} chunks for {doc_id}")
+        logger.info(f"✓ Successfully stored {len(chunks)} chunks for '{doc_id}'")
         
         return UploadResponse(
-            message=f"Successfully processed '{file.filename}'",
+            message=f"Successfully processed '{file.filename}' with {len(chunks)} chunks",
             filename=file.filename,
             chunks_created=len(chunks),
             status="success"
@@ -425,7 +439,7 @@ async def upload_document(file: UploadFile = File(...)):
         raise
     except Exception as e:
         logger.error(f"Upload error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.get("/status")
 async def get_status():
@@ -443,14 +457,13 @@ async def get_status():
 
 @router.get("/documents")
 async def list_documents():
-    """List documents"""
+    """List uploaded documents"""
     docs = []
     for doc_id in uploaded_files:
         if doc_id in document_store:
-            chunks = document_store[doc_id]
             docs.append({
                 "filename": doc_id,
-                "chunks": len(chunks)
+                "chunks": len(document_store[doc_id])
             })
     
     return JSONResponse({"documents": docs, "count": len(docs)})
@@ -460,5 +473,5 @@ async def clear_all():
     """Clear all documents"""
     document_store.clear()
     uploaded_files.clear()
-    logger.info("Cleared all documents")
+    logger.info("All documents cleared")
     return JSONResponse({"message": "All documents cleared", "status": "success"})
