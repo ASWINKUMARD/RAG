@@ -445,9 +445,8 @@
             <button style="margin-top: 20px; padding: 10px 30px; background: #e9ecef; border: none; border-radius: 20px; cursor: pointer; font-weight: 600;" onclick="closeUploadModal()">Close</button>
         </div>
     </div>
-
-    <script>
-    const API_BASE = 'https://rag-77.onrender.com'; // Relative URLs for all environments
+<script>
+    const API_BASE = ''; 
     
     const chatMessages = document.getElementById('chatMessages');
     const messageInput = document.getElementById('messageInput');
@@ -562,5 +561,19 @@
         fileInput.value = '';
     }
 
-    // Rest of functions remain the same...
+   function updateDocumentList() {
+            if (uploadedDocuments.length === 0) {
+                documentList.innerHTML = '<li class="no-documents">No documents uploaded yet</li>';
+            } else {
+                documentList.innerHTML = uploadedDocuments.map(doc => 
+                    `<li class="document-item">📄 ${doc}</li>`
+                ).join('');
+            }
+        }
+
+        uploadModal.addEventListener('click', (e) => {
+            if (e.target === uploadModal) closeUploadModal();
+        });
+
+        messageInput.focus();
 </script>
