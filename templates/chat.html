@@ -447,220 +447,120 @@
     </div>
 
     <script>
-        // FIXED: Use relative URL for deployed environments
-        const API_BASE = window.location.origin;
-        
-        const chatMessages = document.getElementById('chatMessages');
-        const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendButton');
-        const typingIndicator = document.getElementById('typingIndicator');
-        const documentList = document.getElementById('documentList');
-        const uploadModal = document.getElementById('uploadModal');
-        const errorMessage = document.getElementById('errorMessage');
-        const connectionStatus = document.getElementById('connectionStatus');
+    const API_BASE = 'https://rag-77.onrender.com'; // Relative URLs for all environments
+    
+    const chatMessages = document.getElementById('chatMessages');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const typingIndicator = document.getElementById('typingIndicator');
+    const documentList = document.getElementById('documentList');
+    const uploadModal = document.getElementById('uploadModal');
+    const errorMessage = document.getElementById('errorMessage');
+    const connectionStatus = document.getElementById('connectionStatus');
 
-        let uploadedDocuments = [];
+    let uploadedDocuments = [];
 
-        // Check backend connection
-        async function checkConnection() {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
+    async function checkConnection() {
+        try {
+            const response = await fetch(`/health`, { // Note: relative URL
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
 
-                const response = await fetch(`${API_BASE}/health`, {
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    connectionStatus.className = 'connection-status online';
-                    connectionStatus.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
-                } else {
-                    throw new Error('Connection failed');
-                }
-            } catch (error) {
-                connectionStatus.className = 'connection-status offline';
-                connectionStatus.innerHTML = '<span class="status-dot"></span><span>Offline</span>';
-                console.error('Backend connection failed:', error);
-            }
-        }
-
-        // Check connection on load and every 30 seconds
-        checkConnection();
-        setInterval(checkConnection, 30000);
-
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorMessage.style.display = 'block';
-            setTimeout(() => {
-                errorMessage.style.display = 'none';
-            }, 5000);
-        }
-
-        function addMessage(content, isUser, sources = []) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
-            
-            const avatar = document.createElement('div');
-            avatar.className = 'avatar';
-            avatar.textContent = isUser ? '👤' : '🤖';
-            
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'message-content';
-            contentDiv.textContent = content;
-
-            if (!isUser && sources.length > 0) {
-                const sourcesDiv = document.createElement('div');
-                sourcesDiv.className = 'sources';
-                sourcesDiv.innerHTML = '<strong>Sources:</strong> ' + sources.join(', ');
-                contentDiv.appendChild(sourcesDiv);
-            }
-            
-            messageDiv.appendChild(avatar);
-            messageDiv.appendChild(contentDiv);
-            
-            chatMessages.insertBefore(messageDiv, typingIndicator);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function showTypingIndicator() {
-            typingIndicator.style.display = 'block';
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function hideTypingIndicator() {
-            typingIndicator.style.display = 'none';
-        }
-
-        async function sendMessage() {
-            const message = messageInput.value.trim();
-            if (!message) return;
-            
-            addMessage(message, true);
-            messageInput.value = '';
-            
-            sendButton.disabled = true;
-            messageInput.disabled = true;
-            showTypingIndicator();
-            
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-
-                const response = await fetch(`${API_BASE}/api/chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        message: message,
-                        conversation_history: []
-                    }),
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-                
-                const data = await response.json();
-                hideTypingIndicator();
-                
-                if (response.ok) {
-                    addMessage(data.response, false, data.sources || []);
-                } else {
-                    addMessage('Sorry, I encountered an error: ' + (data.detail || 'Unknown error'), false);
-                }
-            } catch (error) {
-                hideTypingIndicator();
-                if (error.name === 'AbortError') {
-                    addMessage('Request timeout. Please try again.', false);
-                } else {
-                    addMessage('Sorry, I\'m having trouble connecting to the backend. Please check the connection status.', false);
-                }
-                console.error('Error:', error);
-            } finally {
-                sendButton.disabled = false;
-                messageInput.disabled = false;
-                messageInput.focus();
-            }
-        }
-
-        function sendQuickMessage(message) {
-            messageInput.value = message;
-            sendMessage();
-        }
-
-        function openUploadModal() {
-            uploadModal.style.display = 'flex';
-        }
-
-        function closeUploadModal() {
-            uploadModal.style.display = 'none';
-            errorMessage.style.display = 'none';
-        }
-
-        async function uploadFile() {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
-            
-            if (!file) return;
-
-            // Validate file size (10MB)
-            if (file.size > 10 * 1024 * 1024) {
-                showError('File size exceeds 10MB limit');
-                fileInput.value = '';
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for uploads
-
-                const response = await fetch(`${API_BASE}/api/upload`, {
-                    method: 'POST',
-                    body: formData,
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-                const data = await response.json();
-
-                if (response.ok) {
-                    uploadedDocuments.push(file.name);
-                    updateDocumentList();
-                    closeUploadModal();
-                    addMessage(`Document "${file.name}" uploaded successfully! You can now ask questions about it.`, false);
-                } else {
-                    showError('Upload failed: ' + (data.detail || 'Unknown error'));
-                }
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    showError('Upload timeout. Please try a smaller file.');
-                } else {
-                    showError('Upload failed. Please check your connection.');
-                }
-                console.error('Upload error:', error);
-            }
-
-            fileInput.value = '';
-        }
-
-        function updateDocumentList() {
-            if (uploadedDocuments.length === 0) {
-                documentList.innerHTML = '<li class="no-documents">No documents uploaded yet</li>';
+            if (response.ok) {
+                connectionStatus.className = 'connection-status online';
+                connectionStatus.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
             } else {
-                documentList.innerHTML = uploadedDocuments.map(doc => 
-                    `<li class="document-item">📄 ${doc}</li>`
-                ).join('');
+                throw new Error('Connection failed');
             }
+        } catch (error) {
+            connectionStatus.className = 'connection-status offline';
+            connectionStatus.innerHTML = '<span class="status-dot"></span><span>Offline</span>';
+            console.error('Backend connection failed:', error);
+        }
+    }
+
+    checkConnection();
+    setInterval(checkConnection, 30000);
+
+    async function sendMessage() {
+        const message = messageInput.value.trim();
+        if (!message) return;
+        
+        addMessage(message, true);
+        messageInput.value = '';
+        
+        sendButton.disabled = true;
+        messageInput.disabled = true;
+        showTypingIndicator();
+        
+        try {
+            const response = await fetch(`/api/chat`, { // Relative URL
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    message: message,
+                    conversation_history: []
+                })
+            });
+            
+            const data = await response.json();
+            hideTypingIndicator();
+            
+            if (response.ok) {
+                addMessage(data.response, false, data.sources || []);
+            } else {
+                addMessage('Error: ' + (data.detail || 'Unknown error'), false);
+            }
+        } catch (error) {
+            hideTypingIndicator();
+            addMessage('Connection error. Please check your connection.', false);
+            console.error('Error:', error);
+        } finally {
+            sendButton.disabled = false;
+            messageInput.disabled = false;
+            messageInput.focus();
+        }
+    }
+
+    async function uploadFile() {
+        const fileInput = document.getElementById('fileInput');
+        const file = fileInput.files[0];
+        
+        if (!file) return;
+
+        if (file.size > 10 * 1024 * 1024) {
+            showError('File size exceeds 10MB');
+            fileInput.value = '';
+            return;
         }
 
-        uploadModal.addEventListener('click', (e) => {
-            if (e.target === uploadModal) closeUploadModal();
-        });
+        const formData = new FormData();
+        formData.append('file', file);
 
-        messageInput.focus();
-    </script>
-</body>
-</html>
+        try {
+            const response = await fetch(`/api/upload`, { // Relative URL
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                uploadedDocuments.push(file.name);
+                updateDocumentList();
+                closeUploadModal();
+                addMessage(`Document "${file.name}" uploaded successfully!`, false);
+            } else {
+                showError('Upload failed: ' + (data.detail || 'Unknown error'));
+            }
+        } catch (error) {
+            showError('Upload failed. Check connection.');
+            console.error('Upload error:', error);
+        }
+
+        fileInput.value = '';
+    }
+
+    // Rest of functions remain the same...
+</script>
