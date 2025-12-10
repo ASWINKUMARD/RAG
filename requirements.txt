@@ -22,6 +22,7 @@ pandas
 python-dotenv
 pydantic
 pydantic-settings
+aiofiles
 
 # Development
 pytest
