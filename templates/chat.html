@@ -269,6 +269,7 @@
             background: white;
             border-radius: 15px;
             width: fit-content;
+            margin-bottom: 20px;
         }
 
         .typing-indicator span {
@@ -447,7 +448,7 @@
     </div>
 
     <script>
-        // CRITICAL FIX: Use full backend URL instead of relative paths
+        // Configure your backend URL here
         const API_BASE = 'https://rag-chat-bot-b0bu.onrender.com';
         
         const chatMessages = document.getElementById('chatMessages');
@@ -510,7 +511,6 @@
             messageDiv.appendChild(avatar);
             messageDiv.appendChild(content);
             
-            // Insert before typing indicator
             chatMessages.insertBefore(messageDiv, typingIndicator);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
