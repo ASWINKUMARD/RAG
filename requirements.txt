@@ -12,6 +12,14 @@ torch
 # Vector database (choose one)
 chromadb
 
+pdfplumber==0.10.3
+pypdf==3.17.4
+
+pdfminer.six
+charset-normalizer
+
+# For deployment
+gunicorn
 httpx
 
 PyPDF2
