@@ -13,20 +13,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Global storage for documents and chunks
 document_store: Dict[str, List[Dict]] = {}
-uploaded_files = []
+uploaded_files: List[str] = []
 
+# -----------------------------
+# Pydantic Models
+# -----------------------------
 class ChatMessage(BaseModel):
     role: str
     content: str
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
-    conversation_history: Optional[List[ChatMessage]] = Field(default=[])
+    conversation_history: Optional[List[ChatMessage]] = Field(default_factory=list)
 
 class ChatResponse(BaseModel):
     response: str
-    sources: Optional[List[str]] = Field(default=[])
+    sources: Optional[List[str]] = Field(default_factory=list)
     status: str = "success"
 
 class UploadResponse(BaseModel):
@@ -35,6 +39,9 @@ class UploadResponse(BaseModel):
     chunks_created: int = 0
     status: str = "success"
 
+# -----------------------------
+# Text Extraction Functions
+# -----------------------------
 def extract_text_from_pdf(content: bytes) -> str:
     """Extract text from PDF with multiple fallback methods"""
     text = ""
@@ -60,6 +67,8 @@ def extract_text_from_pdf(content: bytes) -> str:
         if len(text.strip()) > 100:
             logger.info(f"✓ PyPDF2 extracted {len(text)} chars")
             return text
+    except ImportError:
+        logger.warning("PyPDF2 not installed")
     except Exception as e:
         logger.warning(f"PyPDF2 failed: {e}")
     
@@ -100,10 +109,12 @@ def extract_text_from_docx(content: bytes) -> str:
         
         text_parts = []
         
+        # Extract paragraphs
         for para in doc.paragraphs:
             if para.text.strip():
                 text_parts.append(para.text)
         
+        # Extract tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -120,25 +131,26 @@ def extract_text_from_docx(content: bytes) -> str:
     except ImportError:
         raise HTTPException(
             status_code=500,
-            detail="python-docx not installed"
+            detail="python-docx not installed. Install with: pip install python-docx"
         )
     except Exception as e:
         logger.error(f"DOCX extraction error: {e}")
         return ""
 
 def extract_text_from_file(content: bytes, filename: str) -> str:
-    """Main text extraction"""
+    """Main text extraction dispatcher"""
     try:
         file_lower = filename.lower()
         
         if file_lower.endswith('.txt'):
+            # Try multiple encodings for text files
             for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
                 try:
                     text = content.decode(encoding)
                     if len(text.strip()) > 20:
-                        logger.info(f"✓ TXT decoded: {len(text)} chars")
+                        logger.info(f"✓ TXT decoded with {encoding}: {len(text)} chars")
                         return text
-                except:
+                except (UnicodeDecodeError, AttributeError):
                     continue
             return ""
         
@@ -150,14 +162,18 @@ def extract_text_from_file(content: bytes, filename: str) -> str:
             return extract_text_from_docx(content)
         
         else:
+            # Try to decode as UTF-8 for unknown types
             return content.decode('utf-8', errors='ignore')
             
     except Exception as e:
-        logger.error(f"Extraction error: {e}")
+        logger.error(f"Extraction error for {filename}: {e}")
         return ""
 
+# -----------------------------
+# Chunking Functions
+# -----------------------------
 def create_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[Dict]:
-    """Create overlapping chunks with better structure"""
+    """Create overlapping chunks with metadata"""
     
     # Clean and normalize text
     text = re.sub(r'\s+', ' ', text).strip()
@@ -166,7 +182,7 @@ def create_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List
         logger.warning("Text too short for chunking")
         return []
     
-    # Split into sentences (improved regex)
+    # Split into sentences
     sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
     
     chunks = []
@@ -198,7 +214,7 @@ def create_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List
                 'word_count': len(current_chunk)
             })
             
-            logger.info(f"Chunk {chunk_idx}: {len(chunk_text)} chars, {len(current_chunk)} words")
+            logger.debug(f"Chunk {chunk_idx}: {len(chunk_text)} chars, {len(current_chunk)} words")
             chunk_idx += 1
             
             # Start new chunk with overlap
@@ -229,11 +245,14 @@ def create_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List
             'word_count': len(current_chunk)
         })
         
-        logger.info(f"Chunk {chunk_idx} (final): {len(chunk_text)} chars")
+        logger.debug(f"Chunk {chunk_idx} (final): {len(chunk_text)} chars")
     
     logger.info(f"✓ Created {len(chunks)} chunks from {len(text)} chars")
     return chunks
 
+# -----------------------------
+# Retrieval Functions
+# -----------------------------
 def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
     """Enhanced retrieval with semantic-aware scoring"""
     
@@ -267,7 +286,7 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
     results = []
     
     for doc_id, chunks in document_store.items():
-        logger.info(f"Searching {doc_id}: {len(chunks)} chunks")
+        logger.debug(f"Searching {doc_id}: {len(chunks)} chunks")
         
         for chunk in chunks:
             chunk_text = chunk['text']
@@ -279,26 +298,24 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
             # 1. EXACT PHRASE MATCH (highest priority)
             if query_lower in chunk_lower:
                 score += 1000
-                logger.info(f"✓ Exact phrase match in chunk {chunk['index']}")
+                logger.debug(f"✓ Exact phrase match in chunk {chunk['index']}")
             
             # 2. ALL KEYWORDS PRESENT (very high score)
             if query_keywords.issubset(chunk_words):
                 score += 500
-                logger.info(f"✓ All keywords present in chunk {chunk['index']}")
+                logger.debug(f"✓ All keywords present in chunk {chunk['index']}")
             
             # 3. KEYWORD OVERLAP RATIO
             overlap = len(query_keywords & chunk_words)
             if overlap > 0:
                 overlap_ratio = overlap / len(query_keywords)
                 score += overlap_ratio * 300
-                logger.info(f"Chunk {chunk['index']}: {overlap}/{len(query_keywords)} keywords ({overlap_ratio:.1%})")
+                logger.debug(f"Chunk {chunk['index']}: {overlap}/{len(query_keywords)} keywords ({overlap_ratio:.1%})")
             
             # 4. KEYWORD FREQUENCY (TF component)
             for keyword in query_keywords:
-                # Count occurrences
                 count = chunk_lower.count(keyword)
                 if count > 0:
-                    # Diminishing returns for repeated keywords
                     keyword_score = min(count * 50, 150)
                     score += keyword_score
             
@@ -310,7 +327,7 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
                     if bigram in chunk_lower:
                         score += 200
                 
-                # Trigrams (if query is long enough)
+                # Trigrams
                 if len(query_words) > 2:
                     for i in range(len(query_words) - 2):
                         trigram = f"{query_words[i]} {query_words[i+1]} {query_words[i+2]}"
@@ -328,7 +345,6 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
                 if len(keyword_positions) > 1:
                     keyword_positions.sort()
                     max_distance = keyword_positions[-1] - keyword_positions[0]
-                    # Bonus if keywords appear within 100 characters
                     if max_distance < 100:
                         proximity_score = (100 - max_distance) * 2
                         score += proximity_score
@@ -347,8 +363,11 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
     
     return results[:top_k]
 
+# -----------------------------
+# LLM Generation
+# -----------------------------
 async def generate_llm_response(query: str, context: str, sources: List[str]) -> str:
-    """Generate AI response with improved prompting"""
+    """Generate AI response using OpenRouter"""
     
     system_prompt = """You are a precise RAG (Retrieval-Augmented Generation) assistant. Your task is to answer questions using ONLY the information provided in the context below.
 
@@ -380,7 +399,7 @@ Please answer the user's question based ONLY on the context provided above. Be t
         api_key = os.getenv('OPENROUTER_API_KEY', '')
         
         if not api_key:
-            logger.warning("No OPENROUTER_API_KEY set")
+            logger.warning("No OPENROUTER_API_KEY set - using fallback response")
             return format_fallback_response(query, context, sources)
         
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -395,7 +414,7 @@ Please answer the user's question based ONLY on the context provided above. Be t
                 json={
                     "model": "kwaipilot/kat-coder-pro:free",
                     "messages": messages,
-                    "temperature": 0.1,  # Lower temperature for more accurate responses
+                    "temperature": 0.1,
                     "max_tokens": 2000,
                     "top_p": 0.95
                 }
@@ -410,6 +429,9 @@ Please answer the user's question based ONLY on the context provided above. Be t
                 logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
                 return format_fallback_response(query, context, sources)
                 
+    except httpx.TimeoutException:
+        logger.error("OpenRouter API timeout")
+        return format_fallback_response(query, context, sources)
     except Exception as e:
         logger.error(f"LLM generation error: {e}")
         return format_fallback_response(query, context, sources)
@@ -438,9 +460,12 @@ def format_fallback_response(query: str, context: str, sources: List[str]) -> st
     
     return response
 
+# -----------------------------
+# API ENDPOINTS
+# -----------------------------
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Enhanced chat endpoint with better RAG"""
+    """Enhanced chat endpoint with RAG"""
     try:
         query = request.message.strip()
         logger.info(f"\n{'='*60}\nNEW QUERY: {query}\n{'='*60}")
@@ -452,7 +477,7 @@ async def chat(request: ChatRequest):
                 status="success"
             )
         
-        # Retrieve relevant chunks with enhanced scoring
+        # Retrieve relevant chunks
         retrieved = retrieve_relevant_chunks(query, top_k=4)
         
         if not retrieved:
@@ -470,28 +495,23 @@ async def chat(request: ChatRequest):
                 status="success"
             )
         
-        # Build rich context from retrieved chunks
+        # Build context from retrieved chunks
         context_parts = []
         sources = set()
         
         for score, doc_id, chunk_text, chunk_idx in retrieved:
             sources.add(doc_id)
             
-            # Format context with clear separation and metadata
-            context_section = f"""
-[Document: {doc_id}]
+            context_section = f"""[Document: {doc_id}]
 [Section: {chunk_idx + 1}]
 [Relevance Score: {score:.0f}]
 
-{chunk_text}
-""".strip()
+{chunk_text}""".strip()
             
             context_parts.append(context_section)
-            logger.info(f"Using chunk {chunk_idx} from {doc_id} (score: {score:.1f}, length: {len(chunk_text)} chars)")
+            logger.info(f"Using chunk {chunk_idx} from {doc_id} (score: {score:.1f})")
         
-        # Join with clear separators
-        context = "\n\n" + "\n\n--- NEXT SECTION ---\n\n".join(context_parts)
-        
+        context = "\n\n--- NEXT SECTION ---\n\n".join(context_parts)
         logger.info(f"Total context: {len(context)} chars from {len(retrieved)} chunks")
         
         # Generate response
@@ -509,24 +529,27 @@ async def chat(request: ChatRequest):
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(file: UploadFile = File(...)):
-    """Upload document with enhanced validation"""
+    """Upload and process document"""
     try:
         if not file.filename:
             raise HTTPException(status_code=400, detail="No filename provided")
         
+        # Validate file type
         allowed = ['.pdf', '.docx', '.txt']
-        ext = '.' + file.filename.rsplit('.', 1)[-1].lower()
+        file_ext = '.' + file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
         
-        if ext not in allowed:
+        if file_ext not in allowed:
             raise HTTPException(
                 status_code=400,
-                detail=f"File type '{ext}' not supported. Allowed: PDF, DOCX, TXT"
+                detail=f"File type '{file_ext}' not supported. Allowed: {', '.join(allowed)}"
             )
         
+        # Read file content
         content = await file.read()
         
-        if len(content) > 100 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="File exceeds 100MB")
+        # Validate file size
+        if len(content) > 100 * 1024 * 1024:  # 100MB
+            raise HTTPException(status_code=400, detail="File exceeds 100MB limit")
         
         if len(content) < 100:
             raise HTTPException(status_code=400, detail="File too small or empty")
@@ -539,26 +562,18 @@ async def upload_document(file: UploadFile = File(...)):
         if not text or len(text.strip()) < 50:
             raise HTTPException(
                 status_code=400,
-                detail=f"❌ Could not extract text from '{file.filename}'\n\n"
-                       f"**Possible reasons:**\n"
-                       f"• PDF contains only scanned images (no selectable text)\n"
-                       f"• File is corrupted or password-protected\n"
-                       f"• Unsupported PDF format\n\n"
-                       f"**Solutions:**\n"
-                       f"• For scanned PDFs: Use OCR software first\n"
-                       f"• Try converting to a different format\n"
-                       f"• Ensure the file opens correctly on your computer"
+                detail=f"Could not extract text from '{file.filename}'. "
+                       f"Possible reasons: scanned PDF, corrupted file, or password-protected document."
             )
         
         logger.info(f"✓ Extracted {len(text)} characters")
-        logger.info(f"Preview: {text[:200]}...")
         
-        # Create chunks with optimal size
+        # Create chunks
         chunks = create_chunks(text, chunk_size=1000, overlap=200)
         
         if not chunks:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="Text extracted but chunking failed (text may be too short)"
             )
         
@@ -572,7 +587,7 @@ async def upload_document(file: UploadFile = File(...)):
         logger.info(f"✓ SUCCESS: Stored {len(chunks)} chunks for '{doc_id}'")
         
         return UploadResponse(
-            message=f"✅ Successfully processed '{file.filename}'\n\nCreated {len(chunks)} searchable chunks ({len(text)} total characters)",
+            message=f"✅ Successfully processed '{file.filename}'\n\nCreated {len(chunks)} searchable chunks ({len(text):,} total characters)",
             filename=file.filename,
             chunks_created=len(chunks),
             status="success"
@@ -586,7 +601,7 @@ async def upload_document(file: UploadFile = File(...)):
 
 @router.get("/status")
 async def get_status():
-    """Enhanced status endpoint"""
+    """Get system status"""
     total_chunks = sum(len(chunks) for chunks in document_store.values())
     
     doc_details = []
@@ -613,7 +628,7 @@ async def get_status():
 
 @router.get("/documents")
 async def list_documents():
-    """List documents with detailed statistics"""
+    """List all uploaded documents with statistics"""
     docs = []
     for doc_id in uploaded_files:
         if doc_id in document_store:
@@ -632,8 +647,8 @@ async def list_documents():
 
 @router.delete("/clear")
 async def clear_all():
-    """Clear all documents"""
+    """Clear all uploaded documents"""
     document_store.clear()
     uploaded_files.clear()
     logger.info("✓ All documents cleared")
-    return JSONResponse({"message": "All documents cleared", "status": "success"})
+    return JSONResponse({"message": "All documents cleared successfully", "status": "success"})
