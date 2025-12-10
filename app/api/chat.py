@@ -189,7 +189,6 @@ def create_smart_chunks(text: str, chunk_size: int = 500, overlap: int = 100) ->
     
     # If still no structure, split by sentences
     if len(paragraphs) <= 1:
-        import re
         paragraphs = re.split(r'(?<=[.!?])\s+', text)
     
     current_chunk = []
