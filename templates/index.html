@@ -267,49 +267,58 @@
         <div class="footer">
             <p>Built with FastAPI, AI, and ❤️</p>
             <p style="margin-top: 10px;">
-                <a href="/docs" target="_blank">API Documentation</a>
+                <a href="https://rag-567.onrender.com/docs" target="_blank">API Documentation</a>
             </p>
         </div>
     </div>
 
     <script>
-      <script>
-    const API_BASE = 'https://rag-567.onrender.com';
-    const statusBadge = document.getElementById('statusBadge');
-    const statusText = document.getElementById('statusText');
-    const startButton = document.getElementById('startButton');
+        // CRITICAL FIX: Use full backend URL
+        const API_BASE = 'https://rag-567.onrender.com';
+        const statusBadge = document.getElementById('statusBadge');
+        const statusText = document.getElementById('statusText');
+        const startButton = document.getElementById('startButton');
 
-    async function checkBackendStatus() {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+        async function checkBackendStatus() {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-            const response = await fetch(`${API_BASE}/health`, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
-                signal: controller.signal
-            });
+                const response = await fetch(`${API_BASE}/health`, {
+                    method: 'GET',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    signal: controller.signal
+                });
 
-            clearTimeout(timeoutId);
+                clearTimeout(timeoutId);
 
-            if (response.ok) {
-                const data = await response.json();
-                statusBadge.className = 'status-badge';
-                statusText.textContent = `Backend Online (v${data.version})`;
-                startButton.disabled = false;
-                console.log('✅ Backend connected');
-            } else {
-                throw new Error(`Status ${response.status}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    statusBadge.className = 'status-badge';
+                    statusText.textContent = `Backend Online (v${data.version || '1.0.0'})`;
+                    startButton.disabled = false;
+                    console.log('✅ Backend connected:', API_BASE);
+                } else {
+                    throw new Error(`Status ${response.status}`);
+                }
+            } catch (error) {
+                statusBadge.className = 'status-badge error';
+                statusText.textContent = 'Backend Offline - Retrying...';
+                startButton.disabled = true;
+                console.error('❌ Backend error:', error);
+                // Retry after 5 seconds
+                setTimeout(checkBackendStatus, 5000);
             }
-        } catch (error) {
-            statusBadge.className = 'status-badge error';
-            statusText.textContent = 'Backend Offline';
-            startButton.disabled = true;
-            console.error('❌ Backend error:', error);
-            setTimeout(checkBackendStatus, 5000);
         }
-    }
 
-    checkBackendStatus();
-    setInterval(checkBackendStatus, 30000);
-</script>
+        // Check on page load
+        checkBackendStatus();
+        
+        // Check every 30 seconds
+        setInterval(checkBackendStatus, 30000);
+    </script>
+</body>
+</html>
