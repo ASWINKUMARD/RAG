@@ -378,7 +378,7 @@
 <body>
     <div class="header">
         <div class="header-left">
-            <a href="/" class="back-btn">← Home</a>
+            <a href="index.html" class="back-btn">← Home</a>
             <h1>📚 RAG Chatbot</h1>
         </div>
         <div style="display: flex; align-items: center; gap: 15px;">
@@ -445,123 +445,188 @@
             <button style="margin-top: 20px; padding: 10px 30px; background: #e9ecef; border: none; border-radius: 20px; cursor: pointer; font-weight: 600;" onclick="closeUploadModal()">Close</button>
         </div>
     </div>
-<script>
-    const API_BASE = 'https://rag-567.onrender.com'; 
-    
-    const chatMessages = document.getElementById('chatMessages');
-    const messageInput = document.getElementById('messageInput');
-    const sendButton = document.getElementById('sendButton');
-    const typingIndicator = document.getElementById('typingIndicator');
-    const documentList = document.getElementById('documentList');
-    const uploadModal = document.getElementById('uploadModal');
-    const errorMessage = document.getElementById('errorMessage');
-    const connectionStatus = document.getElementById('connectionStatus');
 
-    let uploadedDocuments = [];
+    <script>
+        // CRITICAL FIX: Use full backend URL instead of relative paths
+        const API_BASE = 'https://rag-567.onrender.com';
+        
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const documentList = document.getElementById('documentList');
+        const uploadModal = document.getElementById('uploadModal');
+        const errorMessage = document.getElementById('errorMessage');
+        const connectionStatus = document.getElementById('connectionStatus');
 
-    async function checkConnection() {
-        try {
-            const response = await fetch(`/health`, { // Note: relative URL
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
-            });
+        let uploadedDocuments = [];
 
-            if (response.ok) {
-                connectionStatus.className = 'connection-status online';
-                connectionStatus.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
-            } else {
-                throw new Error('Connection failed');
+        async function checkConnection() {
+            try {
+                const response = await fetch(`${API_BASE}/health`, {
+                    method: 'GET',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    connectionStatus.className = 'connection-status online';
+                    connectionStatus.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
+                    console.log('✅ Connected to backend');
+                } else {
+                    throw new Error('Connection failed');
+                }
+            } catch (error) {
+                connectionStatus.className = 'connection-status offline';
+                connectionStatus.innerHTML = '<span class="status-dot"></span><span>Offline</span>';
+                console.error('❌ Backend connection failed:', error);
             }
-        } catch (error) {
-            connectionStatus.className = 'connection-status offline';
-            connectionStatus.innerHTML = '<span class="status-dot"></span><span>Offline</span>';
-            console.error('Backend connection failed:', error);
         }
-    }
 
-    checkConnection();
-    setInterval(checkConnection, 30000);
+        checkConnection();
+        setInterval(checkConnection, 30000);
 
-    async function sendMessage() {
-        const message = messageInput.value.trim();
-        if (!message) return;
-        
-        addMessage(message, true);
-        messageInput.value = '';
-        
-        sendButton.disabled = true;
-        messageInput.disabled = true;
-        showTypingIndicator();
-        
-        try {
-            const response = await fetch(`/api/chat`, { // Relative URL
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    message: message,
-                    conversation_history: []
-                })
-            });
+        function addMessage(text, isUser, sources = []) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
             
-            const data = await response.json();
-            hideTypingIndicator();
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = isUser ? '👤' : '🤖';
             
-            if (response.ok) {
-                addMessage(data.response, false, data.sources || []);
-            } else {
-                addMessage('Error: ' + (data.detail || 'Unknown error'), false);
+            const content = document.createElement('div');
+            content.className = 'message-content';
+            content.textContent = text;
+            
+            if (!isUser && sources && sources.length > 0) {
+                const sourcesDiv = document.createElement('div');
+                sourcesDiv.className = 'sources';
+                sourcesDiv.innerHTML = `<strong>📚 Sources:</strong> ${sources.join(', ')}`;
+                content.appendChild(sourcesDiv);
             }
-        } catch (error) {
-            hideTypingIndicator();
-            addMessage('Connection error. Please check your connection.', false);
-            console.error('Error:', error);
-        } finally {
-            sendButton.disabled = false;
-            messageInput.disabled = false;
-            messageInput.focus();
+            
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(content);
+            
+            // Insert before typing indicator
+            chatMessages.insertBefore(messageDiv, typingIndicator);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
-    }
 
-    async function uploadFile() {
-        const fileInput = document.getElementById('fileInput');
-        const file = fileInput.files[0];
-        
-        if (!file) return;
+        function showTypingIndicator() {
+            typingIndicator.style.display = 'block';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
 
-        if (file.size > 10 * 1024 * 1024) {
-            showError('File size exceeds 10MB');
+        function hideTypingIndicator() {
+            typingIndicator.style.display = 'none';
+        }
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            addMessage(message, true);
+            messageInput.value = '';
+            
+            sendButton.disabled = true;
+            messageInput.disabled = true;
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        message: message,
+                        conversation_history: []
+                    })
+                });
+                
+                const data = await response.json();
+                hideTypingIndicator();
+                
+                if (response.ok) {
+                    addMessage(data.response, false, data.sources || []);
+                } else {
+                    addMessage('Error: ' + (data.detail || 'Unknown error'), false);
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                addMessage('Connection error. Please check if backend is running.', false);
+                console.error('Error:', error);
+            } finally {
+                sendButton.disabled = false;
+                messageInput.disabled = false;
+                messageInput.focus();
+            }
+        }
+
+        function sendQuickMessage(message) {
+            messageInput.value = message;
+            sendMessage();
+        }
+
+        function openUploadModal() {
+            uploadModal.style.display = 'flex';
+            errorMessage.style.display = 'none';
+        }
+
+        function closeUploadModal() {
+            uploadModal.style.display = 'none';
+            document.getElementById('fileInput').value = '';
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) return;
+
+            if (file.size > 10 * 1024 * 1024) {
+                showError('File size exceeds 10MB');
+                fileInput.value = '';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_BASE}/api/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    uploadedDocuments.push(file.name);
+                    updateDocumentList();
+                    closeUploadModal();
+                    addMessage(`Document "${file.name}" uploaded successfully! You can now ask questions about it.`, false);
+                } else {
+                    showError('Upload failed: ' + (data.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                showError('Upload failed. Check connection.');
+                console.error('Upload error:', error);
+            }
+
             fileInput.value = '';
-            return;
         }
 
-        const formData = new FormData();
-        formData.append('file', file);
-
-        try {
-            const response = await fetch(`/api/upload`, { // Relative URL
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                uploadedDocuments.push(file.name);
-                updateDocumentList();
-                closeUploadModal();
-                addMessage(`Document "${file.name}" uploaded successfully!`, false);
-            } else {
-                showError('Upload failed: ' + (data.detail || 'Unknown error'));
-            }
-        } catch (error) {
-            showError('Upload failed. Check connection.');
-            console.error('Upload error:', error);
-        }
-
-        fileInput.value = '';
-    }
-
-   function updateDocumentList() {
+        function updateDocumentList() {
             if (uploadedDocuments.length === 0) {
                 documentList.innerHTML = '<li class="no-documents">No documents uploaded yet</li>';
             } else {
@@ -576,4 +641,6 @@
         });
 
         messageInput.focus();
-</script>
+    </script>
+</body>
+</html>
