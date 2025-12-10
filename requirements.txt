@@ -12,9 +12,10 @@ torch
 # Vector database (choose one)
 chromadb
 
+httpx
 
-# Document processing
-pypdf
+PyPDF2
+Pillow
 python-docx
 pandas
 
