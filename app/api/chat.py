@@ -13,13 +13,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Global storage for documents and chunks
 document_store: Dict[str, List[Dict]] = {}
 uploaded_files: List[str] = []
 
-# -----------------------------
-# Pydantic Models
-# -----------------------------
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -39,9 +35,6 @@ class UploadResponse(BaseModel):
     chunks_created: int = 0
     status: str = "success"
 
-# -----------------------------
-# Text Extraction Functions
-# -----------------------------
 def extract_text_from_pdf(content: bytes) -> str:
     """Extract text from PDF with multiple fallback methods"""
     text = ""
@@ -169,13 +162,9 @@ def extract_text_from_file(content: bytes, filename: str) -> str:
         logger.error(f"Extraction error for {filename}: {e}")
         return ""
 
-# -----------------------------
-# Chunking Functions
-# -----------------------------
 def create_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[Dict]:
     """Create overlapping chunks with metadata"""
     
-    # Clean and normalize text
     text = re.sub(r'\s+', ' ', text).strip()
     
     if not text or len(text) < 50:
@@ -250,9 +239,7 @@ def create_chunks(text: str, chunk_size: int = 1000, overlap: int = 200) -> List
     logger.info(f"✓ Created {len(chunks)} chunks from {len(text)} chars")
     return chunks
 
-# -----------------------------
-# Retrieval Functions
-# -----------------------------
+
 def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
     """Enhanced retrieval with semantic-aware scoring"""
     
@@ -362,10 +349,7 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[tuple]:
         logger.warning("⚠ No matching chunks found!")
     
     return results[:top_k]
-
-# -----------------------------
-# LLM Generation
-# -----------------------------
+    
 async def generate_llm_response(query: str, context: str, sources: List[str]) -> str:
     """Generate AI response using OpenRouter"""
     
@@ -459,10 +443,7 @@ def format_fallback_response(query: str, context: str, sources: List[str]) -> st
     response += "\n\n💡 **Tip**: Set OPENROUTER_API_KEY environment variable for AI-generated answers."
     
     return response
-
-# -----------------------------
-# API ENDPOINTS
-# -----------------------------
+    
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Enhanced chat endpoint with RAG"""
